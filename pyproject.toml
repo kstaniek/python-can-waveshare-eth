@@ -1,0 +1,27 @@
+[build-system]
+requires = ["hatchling>=1.21.1"]
+build-backend = "hatchling.build"
+
+[project]
+name = "can-waveshare"
+version = "0.1.0"
+description = "python-can backend for Waveshare 2-CH-CAN-TO-ETH (13-byte TCP wire format over TCP)"
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "MIT" }
+authors = [{ name = "Klaudiusz Staniek" }]
+dependencies = ["python-can>=4.2"]
+
+[project.urls]
+Homepage = "https://github.com/kstaniek/python-can-waveshare-eth"
+Issues = "https://github.com/kstaniek/python-can-waveshare-eth/issues"
+
+[project.entry-points."can.interface"]
+waveshare = "can_waveshare:WaveShareBus"
+
+[tool.pytest.ini_options]
+addopts = "-q"
+testpaths = ["tests"]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.2", "pytest-timeout>=2.3", "ruff>=0.6"]
