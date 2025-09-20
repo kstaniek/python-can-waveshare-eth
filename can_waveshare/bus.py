@@ -4,7 +4,6 @@ import errno
 import logging
 import select
 import socket
-import sys
 import time
 from collections import deque
 from dataclasses import dataclass
