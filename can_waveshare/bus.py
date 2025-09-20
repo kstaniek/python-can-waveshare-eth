@@ -4,6 +4,7 @@ import errno
 import logging
 import select
 import socket
+import sys
 import time
 from collections import deque
 from dataclasses import dataclass
@@ -11,26 +12,13 @@ from typing import Any, Deque, Iterable, List, Optional, Tuple
 
 import can
 
+_WS_WIRE_LEN = 13  # fixed length of Waveshare TCP CAN frame
 
-@dataclass(slots=True)
-class _WSFrame:
-    """
-    Waveshare's fixed 13-byte TCP wire frame.
-
-    Byte 0:  [7]=extended, [6]=rtr, [3:0]=dlc (0..8)
-    Bytes 1..4:  CAN ID (big-endian)
-    Bytes 5..12: Data bytes (0..8 valid according to dlc)
-    """
-
-    can_id: int
-    data: bytes
-    extended: bool
-    rtr: bool
-    dlc: int
-
+class _WSFrameMethods:
     @staticmethod
     def from_bytes(buf: bytes) -> "_WSFrame":
-        if len(buf) != 13:
+        """Decode a 13-byte buffer into a _WSFrame."""
+        if len(buf) != _WS_WIRE_LEN:
             raise ValueError("Waveshare frame must be exactly 13 bytes")
         b0 = buf[0]
         extended = bool(b0 & 0x80)
@@ -39,24 +27,47 @@ class _WSFrame:
         if dlc > 8:
             raise ValueError(f"Invalid DLC {dlc}")
         can_id = int.from_bytes(buf[1:5], "big", signed=False)
-        data = bytes(buf[5 : 5 + dlc])
+        data = bytes(buf[5:5 + dlc])
         return _WSFrame(can_id=can_id, data=data, extended=extended, rtr=rtr, dlc=dlc)
 
     def to_bytes(self) -> bytes:
+        """Encode this frame as a 13-byte buffer."""
         if not (0 <= self.dlc <= 8):
             raise ValueError("DLC must be 0..8")
-        if self.dlc != len(self.data):
-            raise ValueError("dlc must equal len(data)")
-        b0 = (
-            (0x80 if self.extended else 0)
-            | (0x40 if self.rtr else 0)
-            | (self.dlc & 0x0F)
-        )
-        out = bytearray(13)
+        if self.rtr:
+            # RTR carries length but no data bytes on the wire
+            if len(self.data) != 0:
+                raise ValueError("RTR frames must carry zero data bytes")
+        else:
+            if self.dlc != len(self.data):
+                raise ValueError("dlc must equal len(data) for data frames")
+        b0 = (0x80 if self.extended else 0) | (0x40 if self.rtr else 0) | (self.dlc & 0x0F)
+        out = bytearray(_WS_WIRE_LEN)
         out[0] = b0
         out[1:5] = int(self.can_id).to_bytes(4, "big", signed=False)
-        out[5 : 5 + self.dlc] = self.data
+        if not self.rtr and self.dlc:
+            out[5:5 + self.dlc] = self.data
         return bytes(out)
+
+if sys.version_info >= (3, 10):
+    @dataclass(slots=True)
+    class _WSFrame(_WSFrameMethods):
+        """Waveshare fixed 13-byte TCP wire frame (Py3.10+ with dataclass slots)."""
+        can_id: int
+        data: bytes
+        extended: bool
+        rtr: bool
+        dlc: int
+else:
+    @dataclass
+    class _WSFrame(_WSFrameMethods):
+        """Waveshare fixed 13-byte TCP wire frame (Py3.9 with manual __slots__)."""
+        __slots__ = ("can_id", "data", "extended", "rtr", "dlc")
+        can_id: int
+        data: bytes
+        extended: bool
+        rtr: bool
+        dlc: int
 
 
 def _matches_filter(msg: can.Message, flt: dict[str, Any]) -> bool:
