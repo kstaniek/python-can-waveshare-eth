@@ -7,7 +7,7 @@ name = "can-waveshare"
 dynamic = ["version"]
 description = "python-can backend for Waveshare 2-CH-CAN-TO-ETH (13-byte TCP wire format over TCP)"
 readme = "README.md"
-requires-python = ">=3.9"
+requires-python = ">=3.10"
 license = { text = "Apache-2.0" }
 authors = [{ name = "Klaudiusz Staniek" }]
 dependencies = ["python-can>=4.2"]

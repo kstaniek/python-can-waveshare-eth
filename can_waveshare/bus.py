@@ -14,7 +14,17 @@ import can
 
 _WS_WIRE_LEN = 13  # fixed length of Waveshare TCP CAN frame
 
-class _WSFrameMethods:
+
+@dataclass(slots=True)
+class _WSFrame:
+    """Waveshare fixed 13-byte TCP wire frame (Py3.10+ with dataclass slots)."""
+
+    can_id: int
+    data: bytes
+    extended: bool
+    rtr: bool
+    dlc: int
+
     @staticmethod
     def from_bytes(buf: bytes) -> "_WSFrame":
         """Decode a 13-byte buffer into a _WSFrame."""
@@ -27,7 +37,7 @@ class _WSFrameMethods:
         if dlc > 8:
             raise ValueError(f"Invalid DLC {dlc}")
         can_id = int.from_bytes(buf[1:5], "big", signed=False)
-        data = bytes(buf[5:5 + dlc])
+        data = bytes(buf[5 : 5 + dlc])
         return _WSFrame(can_id=can_id, data=data, extended=extended, rtr=rtr, dlc=dlc)
 
     def to_bytes(self) -> bytes:
@@ -41,33 +51,17 @@ class _WSFrameMethods:
         else:
             if self.dlc != len(self.data):
                 raise ValueError("dlc must equal len(data) for data frames")
-        b0 = (0x80 if self.extended else 0) | (0x40 if self.rtr else 0) | (self.dlc & 0x0F)
+        b0 = (
+            (0x80 if self.extended else 0)
+            | (0x40 if self.rtr else 0)
+            | (self.dlc & 0x0F)
+        )
         out = bytearray(_WS_WIRE_LEN)
         out[0] = b0
         out[1:5] = int(self.can_id).to_bytes(4, "big", signed=False)
         if not self.rtr and self.dlc:
-            out[5:5 + self.dlc] = self.data
+            out[5 : 5 + self.dlc] = self.data
         return bytes(out)
-
-if sys.version_info >= (3, 10):
-    @dataclass(slots=True)
-    class _WSFrame(_WSFrameMethods):
-        """Waveshare fixed 13-byte TCP wire frame (Py3.10+ with dataclass slots)."""
-        can_id: int
-        data: bytes
-        extended: bool
-        rtr: bool
-        dlc: int
-else:
-    @dataclass
-    class _WSFrame(_WSFrameMethods):
-        """Waveshare fixed 13-byte TCP wire frame (Py3.9 with manual __slots__)."""
-        __slots__ = ("can_id", "data", "extended", "rtr", "dlc")
-        can_id: int
-        data: bytes
-        extended: bool
-        rtr: bool
-        dlc: int
 
 
 def _matches_filter(msg: can.Message, flt: dict[str, Any]) -> bool:
@@ -268,7 +262,9 @@ class WaveShareBus(can.BusABC):
         try:
             _send_all(self._sock, payload)
         except OSError as e:
-            raise can.CanError(f"WaveShareBus.send failed (id=0x{arb_id:X}): {e}") from e
+            raise can.CanError(
+                f"WaveShareBus.send failed (id=0x{arb_id:X}): {e}"
+            ) from e
 
         # record for own-echo suppression (if active)
         if self._suppress_own:
