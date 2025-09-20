@@ -10,17 +10,34 @@ permissions:
   contents: read
 
 jobs:
+  package:
+    name: Build & inspect our package
+    runs-on: ubuntu-latest
+    env:
+      # Avoid local version identifiers in built packages
+      SETUPTOOLS_SCM_NO_LOCAL: "1"
+    
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
   test:
+    needs: [package]
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
         python-version: ["3.9","3.10","3.11","3.12","3.13"]
 
+    name: Test on Python ${{ matrix.python-version }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
 
-      - uses: actions/setup-python@v5
+      - name: Setup python
+        uses: actions/setup-python@v6
         with:
           python-version: ${{ matrix.python-version }}
           cache: pip
@@ -67,3 +84,35 @@ jobs:
           print("Installed wheel exposes entry point OK.")
           PY
 
+  test-pypi-upload:
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    needs: [test]
+    runs-on: ubuntu-latest
+    name: Upload to Test PyPI
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Setup python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+
+      - name: Install package + build deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e .[dev]
+          python -m pip install --upgrade build twine
+
+      - name: Build sdist & wheel
+        run: |
+          python -m build
+
+      - name: Publish release to PyPI
+        continue-on-error: true
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          repository-url: https://test.pypi.org/legacy/

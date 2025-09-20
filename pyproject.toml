@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "can-waveshare"
-version = "0.0.0"
+dynamic = ["version"]
 description = "python-can backend for Waveshare 2-CH-CAN-TO-ETH (13-byte TCP wire format over TCP)"
 readme = "README.md"
 requires-python = ">=3.9"
@@ -25,3 +25,7 @@ testpaths = ["tests"]
 
 [project.optional-dependencies]
 dev = ["pytest>=8.2", "pytest-timeout>=2.3", "ruff>=0.6", "codespell>=2.4"]
+
+[tool.setuptools_scm]
+version_scheme = "post-release"
+local_scheme = "no-local-version"
