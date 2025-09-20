@@ -1,4 +1,7 @@
 [![CI](https://github.com/kstaniek/python-can-waveshare-eth/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/kstaniek/python-can-waveshare-eth/actions/workflows/ci.yml)
+[![PyPI version](https://img.shields.io/pypi/v/can-waveshare)](https://pypi.org/project/can-waveshare/)
+[![PyPI - Python Version](https://img.shields.io/pypi/pyversions/can-waveshare)](https://pypi.org/project/can-waveshare/)
+
 
 # can-waveshare
 
