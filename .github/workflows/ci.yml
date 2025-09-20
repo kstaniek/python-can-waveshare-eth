@@ -4,10 +4,15 @@ on:
   push:
     branches: ["**"]
   pull_request:
-  workflow_dispatch:
+  release:
+    types: [published]
 
-permissions:
-  contents: read
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: true
+
+env:
+  FORCE_COLOR: 1
 
 jobs:
   package:
@@ -21,6 +26,8 @@ jobs:
       - uses: actions/checkout@v5
         with:
           fetch-depth: 0
+      - uses: hynek/build-and-inspect-python-package@v2
+
 
   test:
     needs: [package]
@@ -83,6 +90,7 @@ jobs:
           assert any(ep.name=='waveshare' for ep in eps), eps
           print("Installed wheel exposes entry point OK.")
           PY
+      
       - uses: actions/download-artifact@v5
         with:
           name: Packages
