@@ -83,6 +83,10 @@ jobs:
           assert any(ep.name=='waveshare' for ep in eps), eps
           print("Installed wheel exposes entry point OK.")
           PY
+      - uses: actions/download-artifact@v5
+        with:
+          name: Packages
+          path: dist
 
   test-pypi-upload:
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
