@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import errno
+import logging
 import select
 import socket
 import time
@@ -88,10 +89,11 @@ class WaveShareBus(can.BusABC):
 
     Optional kwargs:
       - receive_own_messages: bool (default False) – suppress echoed frames (best effort)
-      - tcp_nodelay: bool (default True)
+      - tcp_nodelay: bool (default True)  | alias: tcp_tune=True
       - keepalive: bool (default True)
       - timeout: float | None – default timeout used as base for send/recv select
       - can_filters: list[dict] – software filters applied in this backend
+      - echo_window: float (default 0.1s) – suppression window for own echoes
 
     Limitations:
       - CAN-FD is NOT supported (Waveshare wire format is limited to 8 data bytes).
@@ -109,8 +111,13 @@ class WaveShareBus(can.BusABC):
         keepalive: bool = True,
         timeout: Optional[float] = None,
         can_filters: Optional[List[dict[str, Any]]] = None,
+        echo_window: float = 0.1,
         **kwargs: Any,
     ) -> None:
+        # normalize legacy kw: bridge may pass tcp_tune=True
+        if "tcp_tune" in kwargs:
+            tcp_nodelay = bool(kwargs.pop("tcp_tune"))
+
         # Allow passing host/port via channel
         ch_host, ch_port = _parse_channel(channel) if channel else (None, None)
         host = host or ch_host
@@ -122,40 +129,55 @@ class WaveShareBus(can.BusABC):
             )
 
         self.channel_info = f"Waveshare TCP {host}:{port}"
-        # Initialize BusABC (sets up periodic send plumbing, etc.)
-        super().__init__(channel=channel or f"{host}:{port}", **kwargs)
+        # Initialize BusABC (don’t forward unknown kwargs)
+        super().__init__(channel=channel or f"{host}:{port}")
 
         self._host: str = host
         self._port: int = int(port)
         self._timeout_default: Optional[float] = timeout
         self._filters: List[dict[str, Any]] = list(can_filters or [])
+        self._echo_window: float = float(echo_window)
 
-        # Socket setup
-        self._sock = socket.socket(
-            socket.AF_INET6 if _is_ipv6_literal(host) else socket.AF_INET,
-            socket.SOCK_STREAM,
-        )
-        try:
-            if tcp_nodelay:
-                self._sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
-        except OSError:
-            pass
-        try:
-            if keepalive:
-                self._sock.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
-        except OSError:
-            pass
+        self._started: bool = False
+        self._closed: bool = False
+        self._sock: Optional[socket.socket] = None
 
-        # Connect
+        # Resolve host (IPv4/IPv6/DNS) and try candidates in order
         try:
-            self._sock.connect((self._host, self._port))
+            infos = socket.getaddrinfo(self._host, self._port, 0, socket.SOCK_STREAM)
         except OSError as e:
-            self._sock.close()
             raise can.CanError(
-                f"WaveShareBus: connect to {self._host}:{self._port} failed: {e}"
+                f"WaveShareBus: resolve failed for {self._host}:{self._port}: {e}"
             ) from e
 
-        self._closed: bool = False
+        last_err: Optional[OSError] = None
+        for family, socktype, proto, _, sockaddr in infos:
+            s = socket.socket(family, socktype, proto)
+            try:
+                if tcp_nodelay:
+                    try:
+                        s.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+                    except OSError:
+                        pass
+                if keepalive:
+                    _apply_keepalive(s)
+
+                s.connect(sockaddr)
+                # success
+                self._sock = s
+                self._started = True
+                break
+            except OSError as e:
+                last_err = e
+                try:
+                    s.close()
+                except OSError:
+                    pass
+                continue
+        else:
+            raise can.CanError(
+                f"WaveShareBus: connect to {self._host}:{self._port} failed: {last_err}"
+            ) from last_err
 
         # Best-effort own-message suppression (for echoing bridges)
         self._suppress_own: bool = not bool(receive_own_messages)
@@ -166,22 +188,28 @@ class WaveShareBus(can.BusABC):
     def shutdown(self) -> None:
         self._closed = True
         try:
-            self._sock.shutdown(socket.SHUT_RDWR)
-        except OSError:
-            pass
-        try:
-            self._sock.close()
+            if self._sock is not None:
+                try:
+                    self._sock.shutdown(socket.SHUT_RDWR)
+                except OSError:
+                    pass
+                try:
+                    self._sock.close()
+                except OSError:
+                    pass
         finally:
+            self._sock = None
+            self._started = False
             super().shutdown()
 
     def fileno(self) -> Optional[int]:
         try:
-            return self._sock.fileno()
+            return self._sock.fileno() if self._sock is not None else None
         except OSError:
             return None
 
     def send(self, msg: can.Message, timeout: Optional[float] = None) -> None:
-        if self._closed:
+        if self._closed or self._sock is None:
             raise can.CanError("WaveShareBus is closed")
 
         if getattr(msg, "is_fd", False):
@@ -195,14 +223,16 @@ class WaveShareBus(can.BusABC):
 
         if extended:
             if not (0 <= arb_id <= 0x1FFFFFFF):
-                raise can.CanError(f"Invalid 29-bit CAN ID: {arb_id:#x}")
+                raise can.CanError(f"Invalid 29-bit CAN ID: 0x{arb_id:X}")
         else:
             if not (0 <= arb_id <= 0x7FF):
-                raise can.CanError(f"Invalid 11-bit CAN ID: {arb_id:#x}")
+                raise can.CanError(f"Invalid 11-bit CAN ID: 0x{arb_id:X}")
 
         data = bytes(msg.data or b"")
         if len(data) > 8:
-            raise can.CanError("Data length > 8 not supported by Waveshare format")
+            raise can.CanError(
+                f"Data length {len(data)} > 8 not supported by Waveshare format"
+            )
 
         # For RTR, dlc declares requested length. Prefer explicit msg.dlc if present.
         try:
@@ -227,7 +257,7 @@ class WaveShareBus(can.BusABC):
         try:
             _send_all(self._sock, payload)
         except OSError as e:
-            raise can.CanError(f"WaveShareBus.send failed: {e}") from e
+            raise can.CanError(f"WaveShareBus.send failed (id=0x{arb_id:X}): {e}") from e
 
         # record for own-echo suppression (if active)
         if self._suppress_own:
@@ -236,7 +266,7 @@ class WaveShareBus(can.BusABC):
             )
 
     def recv(self, timeout: Optional[float] = None) -> Optional[can.Message]:
-        if self._closed:
+        if self._closed or self._sock is None:
             return None
 
         deadline: Optional[float] = None
@@ -284,7 +314,9 @@ class WaveShareBus(can.BusABC):
             ):
                 continue
 
-            if self._suppress_own and _matches_recent(self._recent_tx, msg, window=0.1):
+            if self._suppress_own and _matches_recent(
+                self._recent_tx, msg, window=self._echo_window
+            ):
                 continue
 
             return msg
@@ -294,12 +326,44 @@ class WaveShareBus(can.BusABC):
     def set_filters(self, filters: Optional[Iterable[dict[str, Any]]]) -> None:
         self._filters = list(filters or [])
 
+    @property
+    def is_open(self) -> bool:
+        return not self._closed and self._started and self._sock is not None
+
+    def __del__(self):
+        # Warn only if object started and not shutdown; avoid noise on failed __init__
+        try:
+            if getattr(self, "_started", False) and not getattr(self, "_closed", True):
+                logging.getLogger(__name__).warning(
+                    "WaveShareBus was not properly shut down"
+                )
+        except Exception:
+            pass
+
 
 # ---------- helpers ----------
 
 
 class _SocketClosed(Exception):
     pass
+
+
+def _apply_keepalive(sock: socket.socket) -> None:
+    """Best-effort TCP keepalive tuning (portable; guarded)."""
+    try:
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
+        # Linux-specific options guarded by hasattr:
+        if hasattr(socket, "TCP_KEEPIDLE"):
+            sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_KEEPIDLE, 30)
+        if hasattr(socket, "TCP_KEEPINTVL"):
+            sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_KEEPINTVL, 10)
+        if hasattr(socket, "TCP_KEEPCNT"):
+            sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_KEEPCNT, 3)
+        if hasattr(socket, "TCP_USER_TIMEOUT"):
+            # 120s TX user-timeout; quicker broken-link detection on some kernels
+            sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_USER_TIMEOUT, 120_000)
+    except OSError:
+        pass
 
 
 def _choose_timeout(
@@ -408,8 +472,3 @@ def _parse_channel(channel: Optional[str]) -> Tuple[Optional[str], Optional[int]
         except ValueError:
             return (None, None)
     return (None, None)
-
-
-def _is_ipv6_literal(host: str) -> bool:
-    """Heuristic: treat as IPv6 if it contains ':' and not a bracketed literal removed by _parse_channel."""
-    return ":" in host
