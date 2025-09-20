@@ -1,3 +1,5 @@
+[![CI](https://github.com/kstaniek/python-can-waveshare-eth/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/kstaniek/python-can-waveshare-eth/actions/workflows/ci.yml)
+
 # can-waveshare
 
 **python-can** backend for the **Waveshare 2-CH-CAN-TO-ETH** bridge that uses a fixed **13‑byte** TCP wire format.
@@ -5,6 +7,11 @@ Works with `python -m can.viewer/logger/player` and plain `can.Bus(...)`.
 
 > Transport: TCP server on the device (e.g., `:20001` for CAN1, `:20002` for CAN2).  
 > Frames: 13 bytes: `[flags/dlc][id:4][data:0..8 padded]`
+
+**References**
+- python-can documentation: [python-can.readthedocs.io](https://python-can.readthedocs.io/) — see [Bus API](https://python-can.readthedocs.io/en/stable/bus.html), [Command Line Tools](https://python-can.readthedocs.io/en/stable/scripts.html), and [Configuration](https://python-can.readthedocs.io/en/stable/configuration.html).
+- Waveshare product page: [2-CH-CAN-TO-ETH](https://www.waveshare.com/2-ch-can-to-eth.htm) and vendor [Wiki](https://www.waveshare.com/wiki/2-CH-CAN-TO-ETH).
+
 
 ## Install
 
