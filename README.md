@@ -66,4 +66,4 @@ with can.Bus(interface="waveshare", channel="172.31.11.67:20001") as bus:
 
 ## License
 
-MIT
+Apache 2.0
