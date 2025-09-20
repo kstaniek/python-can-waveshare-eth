@@ -89,6 +89,8 @@ jobs:
     needs: [test]
     runs-on: ubuntu-latest
     name: Upload to Test PyPI
+    permissions:
+      id-token: write
     steps:
       - uses: actions/checkout@v5
         with:
