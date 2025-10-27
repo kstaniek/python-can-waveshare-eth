@@ -91,7 +91,7 @@ jobs:
           print("Installed wheel exposes entry point OK.")
           PY
       
-      - uses: actions/download-artifact@v5
+      - uses: actions/download-artifact@v6
         with:
           name: Packages
           path: dist
@@ -103,7 +103,7 @@ jobs:
       id-token: write
     needs: [test]
     steps:
-    - uses: actions/download-artifact@v5
+    - uses: actions/download-artifact@v6
       with:
         name: Packages
         path: dist
@@ -117,7 +117,7 @@ jobs:
     permissions:
       contents: write
     steps:
-    - uses: actions/download-artifact@v5
+    - uses: actions/download-artifact@v6
       with:
         name: Packages
         path: dist
@@ -136,7 +136,7 @@ jobs:
     permissions:
       id-token: write
     steps:
-      - uses: actions/download-artifact@v5
+      - uses: actions/download-artifact@v6
         with:
           name: Packages
           path: dist
