@@ -23,7 +23,7 @@ jobs:
       SETUPTOOLS_SCM_NO_LOCAL: "1"
     
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
         with:
           fetch-depth: 0
       - uses: hynek/build-and-inspect-python-package@v2
@@ -39,7 +39,7 @@ jobs:
 
     name: Test on Python ${{ matrix.python-version }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
         with:
           fetch-depth: 0
 
